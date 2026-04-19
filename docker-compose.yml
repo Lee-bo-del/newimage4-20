@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: huabu-app
+    restart: always
+    ports:
+      - "3325:3325"
+    environment:
+      - NODE_ENV=production
