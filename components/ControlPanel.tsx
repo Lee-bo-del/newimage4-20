@@ -938,6 +938,7 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
 	        const refSrcs = effectiveReferenceImages.map(r => r.src);
 	        const isDoubao = modelName.startsWith('doubao');
           const isGrok = isGrokImageModel(modelName);
+          const isGptImage2 = modelName === 'gpt-image-2';
 	                const processSubmission = async (imagePayload: any, customPrompt?: string) => {
           const perRequestImageCount = 1;
           for (let reqIdx = 0; reqIdx < quantity; reqIdx++) {
@@ -981,6 +982,30 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
               })
               .catch((err: any) => {
                 placeholderIds.forEach(pid => onUpdateGeneration(pid, null, err.message));
+              });
+          }
+        };
+
+        const processEditSubmission = async (imageData: string, customPrompt?: string) => {
+          const perRequestImageCount = 1;
+          for (let reqIdx = 0; reqIdx < quantity; reqIdx++) {
+            const placeholderIds = onInitGenerations(perRequestImageCount, currentPrompt, effectiveRatio);
+            const promptForModel = customPrompt || currentPrompt;
+            const payload: any = {
+              model: modelName,
+              prompt: promptForModel,
+              image: imageData,
+            };
+            editImageApi(apiKey, payload)
+              .then((res: any) => {
+                if (res.taskId) {
+                  placeholderIds.forEach(pid => onUpdateGeneration(pid, null, undefined, res.taskId));
+                } else {
+                  placeholderIds.forEach(pid => onUpdateGeneration(pid, null, "未知返回格式"));
+                }
+              })
+              .catch((err: any) => {
+                placeholderIds.forEach(pid => onUpdateGeneration(pid, null, err.message || "生成失败"));
               });
           }
         };
@@ -1034,10 +1059,16 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
             const compositePrompt = effectiveReferenceImages.length > 1
               ? `[多图参考] 输入是 ${effectiveReferenceImages.length} 张图片的拼贴。${currentPrompt}`
               : currentPrompt;
-            processSubmission({ 
-              image: collageBase64.split(',')[1],
-              images: [collageBase64.split(',')[1]]
-            }, compositePrompt);
+            if (isGptImage2) {
+              // GPT-image-2 图生图改走 edits 接口（异步），并保留 data URL 让后端识别真实 MIME。
+              processEditSubmission(collageBase64, compositePrompt);
+            } else {
+              const collageRaw = collageBase64.split(',')[1];
+              processSubmission({
+                image: collageRaw,
+                images: [collageRaw]
+              }, compositePrompt);
+            }
           }).catch((err: any) => { setError(err.message); });
         }
 	            } else {

@@ -458,6 +458,33 @@ app.post("/api/edit", generateLimiter, async (req, res) => {
       hasMask: !!requestBody.mask
     });
 
+    const parseBase64ImageInput = (value, fallbackExt = "png", fallbackMime = "image/png") => {
+      if (typeof value !== "string") return null;
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+
+      const dataUrlMatch = trimmed.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=\r\n]+)$/);
+      if (dataUrlMatch) {
+        const mime = dataUrlMatch[1].toLowerCase();
+        const extMap = {
+          "image/png": "png",
+          "image/jpeg": "jpg",
+          "image/jpg": "jpg",
+          "image/webp": "webp",
+          "image/gif": "gif",
+        };
+        const ext = extMap[mime] || fallbackExt;
+        const buffer = Buffer.from(dataUrlMatch[2].replace(/\s+/g, ""), "base64");
+        return { buffer, mime, ext };
+      }
+
+      return {
+        buffer: Buffer.from(trimmed, "base64"),
+        mime: fallbackMime,
+        ext: fallbackExt,
+      };
+    };
+
     const formData = new FormData();
     formData.append('model', requestBody.model);
     formData.append('prompt', requestBody.prompt);
@@ -468,13 +495,23 @@ app.post("/api/edit", generateLimiter, async (req, res) => {
     if (requestBody.aspect_ratio) formData.append('aspect_ratio', requestBody.aspect_ratio);
 
     if (requestBody.image) {
-      const imgBuffer = Buffer.from(requestBody.image, 'base64');
-      formData.append('image', imgBuffer, { filename: 'image.png', contentType: 'image/png' });
+      const parsedImage = parseBase64ImageInput(requestBody.image, "png", "image/png");
+      if (parsedImage && parsedImage.buffer.length > 0) {
+        formData.append('image', parsedImage.buffer, {
+          filename: `image.${parsedImage.ext}`,
+          contentType: parsedImage.mime,
+        });
+      }
     }
     
     if (requestBody.mask) {
-      const maskBuffer = Buffer.from(requestBody.mask, 'base64');
-      formData.append('mask', maskBuffer, { filename: 'mask.png', contentType: 'image/png' });
+      const parsedMask = parseBase64ImageInput(requestBody.mask, "png", "image/png");
+      if (parsedMask && parsedMask.buffer.length > 0) {
+        formData.append('mask', parsedMask.buffer, {
+          filename: `mask.${parsedMask.ext}`,
+          contentType: parsedMask.mime,
+        });
+      }
     }
 
     const response = await requestWithRetry(

@@ -73,7 +73,7 @@ export const ImageFormConfig: React.FC = () => {
             {
               value: 'gpt-image-2',
               label: 'GPT-image-2',
-              cost: 10,
+              cost: 1,
               icon: <OpenAILogo />,
             },
           ]}
