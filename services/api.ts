@@ -55,6 +55,9 @@ export function findAllUrlsInObject(obj: any, results: string[] = []) {
     else if (obj.image_url && typeof obj.image_url === 'string' && (obj.image_url.startsWith('http') || obj.image_url.startsWith('data:'))) {
         results.push(obj.image_url);
     }
+    else if (obj.b64_json && typeof obj.b64_json === 'string') {
+        results.push(`data:image/png;base64,${obj.b64_json}`);
+    }
 
     for (let key in obj) {
         if (Object.prototype.hasOwnProperty.call(obj, key)) {

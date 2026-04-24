@@ -14,7 +14,7 @@ import ModelSelector from './ModelSelector';
 import ImageFormConfig from './ImageFormConfig';
 import VideoFormConfig from './VideoFormConfig';
 import { GoogleLogo, OpenAILogo } from './Logos';
-import { DOUBAO_RESOLUTIONS, getDoubaoSize, findClosestRatio, extractRatioFromPrompt, renderMaskToDataURL, getBase64FromUrl } from '../src/utils/imageUtils';
+import { DOUBAO_RESOLUTIONS, getDoubaoSize, findClosestRatio, extractRatioFromPrompt, renderMaskToDataURL, getBase64FromUrl, calculateGptImageSize } from '../src/utils/imageUtils';
 import { parsePromptReferenceTags } from '../src/utils/promptTags';
 
 // Branding Icons are now in Logos.tsx
@@ -83,6 +83,10 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
     videoHd, setVideoHd,
     imageModel, setImageModel,
     imageLine, setImageLine,
+    gptImageQuality,
+    gptImageOutputFormat,
+    gptImageOutputCompression,
+    gptImageModeration,
     grokReferenceMode,
     thinkingLevel, setThinkingLevel,
     brushSize, setBrushSize,
@@ -382,7 +386,7 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
     e.stopPropagation();
     if (e.dataTransfer.types.includes('application/x-sort-index')) return;
 
-    const max = isVideoMode ? (VIDEO_LOSS_CONFIG[videoModel as keyof typeof VIDEO_LOSS_CONFIG]?.max || 1) : 10;
+    const max = isVideoMode ? (VIDEO_LOSS_CONFIG[videoModel as keyof typeof VIDEO_LOSS_CONFIG]?.max || 1) : (imageModel === 'gpt-image-2' ? 16 : 10);
     
     // DEBUG ALERT
     // alert(`[Debug] Drop: Max=${max}, Current=${referenceImages.length}, IsVideo=${isVideoMode}, Model=${videoModel}`);
@@ -445,7 +449,7 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
   const handlePanelFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const files = Array.from(e.target.files);
-      const max = isVideoMode ? (VIDEO_LOSS_CONFIG[videoModel as keyof typeof VIDEO_LOSS_CONFIG]?.max || 1) : 10;
+      const max = isVideoMode ? (VIDEO_LOSS_CONFIG[videoModel as keyof typeof VIDEO_LOSS_CONFIG]?.max || 1) : (imageModel === 'gpt-image-2' ? 16 : 10);
       const remainingSlots = max - referenceImages.length;
 
       if (remainingSlots <= 0) {
@@ -724,9 +728,10 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
       effectiveRatio = normalizeLine2Ratio(effectiveRatio);
     }
 
+    const isGptImage2Model = imageModel === 'gpt-image-2';
     const promptWithoutAr = parsedPrompt.replace(/\s*--ar\s*\d+\s*[:：]\s*\d+/gi, '').trim();
     const promptWithRatio = `${promptWithoutAr} --ar ${effectiveRatio}`;
-    const currentPrompt = promptWithRatio;
+    const currentPrompt = isGptImage2Model ? promptWithoutAr : promptWithRatio;
     // Decision Logic:
     // User explicitly requested NO "Regenerate" / "Edit Mode".
     // Panel always functions as "Create New". References must be added manually.
@@ -737,6 +742,44 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
     // 鐠侊紕鐣荤€圭偤妾崣鎴︹偓浣虹舶API閻ㄥ墕ize閸欏倹鏆?
     const getEffectiveSize = (model: string) => {
       return imageSize.toLowerCase();
+    };
+
+    const getGptImagePayload = (basePrompt: string, n = 1) => {
+      const payload: any = {
+        model: 'gpt-image-2',
+        prompt: basePrompt,
+        size: calculateGptImageSize(imageSize, effectiveRatio),
+        quality: gptImageQuality,
+        output_format: gptImageOutputFormat,
+        moderation: gptImageModeration,
+        n,
+      };
+
+      if (gptImageOutputFormat !== 'png' && gptImageOutputCompression !== null) {
+        payload.output_compression = Math.max(0, Math.min(100, gptImageOutputCompression));
+      }
+
+      return payload;
+    };
+
+    const referenceToDataUrl = async (ref: ReferenceImage): Promise<string | null> => {
+      try {
+        if (ref.blob) {
+          return await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              if (typeof reader.result === 'string') resolve(reader.result);
+              else reject(new Error('Failed to read blob as data URL'));
+            };
+            reader.onerror = () => reject(reader.error || new Error('FileReader error'));
+            reader.readAsDataURL(ref.blob as Blob);
+          });
+        }
+        return await getBase64FromUrl(ref.src);
+      } catch (error) {
+        console.error('Failed to convert reference image:', error);
+        return null;
+      }
     };
 
     const isGrokImageModel = (model: string) => model.startsWith('grok-');
@@ -986,15 +1029,14 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
           }
         };
 
-        const processEditSubmission = async (imageData: string, customPrompt?: string) => {
+        const processEditSubmission = async (imageDataUrls: string[], customPrompt?: string) => {
           const perRequestImageCount = 1;
           for (let reqIdx = 0; reqIdx < quantity; reqIdx++) {
             const placeholderIds = onInitGenerations(perRequestImageCount, currentPrompt, effectiveRatio);
             const promptForModel = customPrompt || currentPrompt;
             const payload: any = {
-              model: modelName,
-              prompt: promptForModel,
-              image: imageData,
+              ...getGptImagePayload(promptForModel, 1),
+              images: imageDataUrls,
             };
             editImageApi(apiKey, payload)
               .then((res: any) => {
@@ -1014,6 +1056,14 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
 	          // Doubao models support multi-image array natively
 	          const imageArray = refSrcs.map(src => src.includes(',') ? src.split(',')[1] : src);
 	          processSubmission({ image: imageArray });
+          } else if (isGptImage2) {
+            const imageDataUrls = (await Promise.all(effectiveReferenceImages.map(referenceToDataUrl)))
+              .filter((value): value is string => !!value);
+            if (imageDataUrls.length === 0) {
+              setError("参考图处理失败，请重新上传后再试");
+              return;
+            }
+            processEditSubmission(imageDataUrls, currentPrompt);
           } else if (isGrok) {
             // Grok 图生图必须传可读图片数据，避免 blob/url 导致参考图失效。
             const base64Results = await Promise.all(
@@ -1059,16 +1109,11 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
             const compositePrompt = effectiveReferenceImages.length > 1
               ? `[多图参考] 输入是 ${effectiveReferenceImages.length} 张图片的拼贴。${currentPrompt}`
               : currentPrompt;
-            if (isGptImage2) {
-              // GPT-image-2 图生图改走 edits 接口（异步），并保留 data URL 让后端识别真实 MIME。
-              processEditSubmission(collageBase64, compositePrompt);
-            } else {
-              const collageRaw = collageBase64.split(',')[1];
-              processSubmission({
-                image: collageRaw,
-                images: [collageRaw]
-              }, compositePrompt);
-            }
+            const collageRaw = collageBase64.split(',')[1];
+            processSubmission({
+              image: collageRaw,
+              images: [collageRaw]
+            }, compositePrompt);
           }).catch((err: any) => { setError(err.message); });
         }
 	            } else {
@@ -1077,14 +1122,16 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
         const perRequestImageCount = 1;
         for (let reqIdx = 0; reqIdx < quantity; reqIdx++) {
           const placeholderIds = onInitGenerations(perRequestImageCount, currentPrompt, effectiveRatio);
-          const payload: any = {
-            model: modelName,
-            prompt: promptForModel,
-            size: getEffectiveSize(modelName),
-            aspect_ratio: effectiveRatio,
-            n: 1,
-            ...(isSyncMode ? { isSync: true } : {})
-          };
+          const payload: any = isGptImage2Model
+            ? getGptImagePayload(currentPrompt, 1)
+            : {
+                model: modelName,
+                prompt: promptForModel,
+                size: getEffectiveSize(modelName),
+                aspect_ratio: effectiveRatio,
+                n: 1,
+                ...(isSyncMode ? { isSync: true } : {})
+              };
           generateImageApi(apiKey, payload)
             .then((res: any) => {
               if (res.taskId) {
@@ -1388,7 +1435,7 @@ const ControlPanel: React.FC<ControlPanelProps> = React.memo(({ onInitGeneration
   ];
   const maxReferenceImages = isVideoMode
     ? (VIDEO_LOSS_CONFIG[videoModel as keyof typeof VIDEO_LOSS_CONFIG]?.max || 1)
-    : 10;
+    : (imageModel === 'gpt-image-2' ? 16 : 10);
   const promptReferenceMentionState = useMemo(() => {
     const referenceTagRegex = /@图\s*([1-9]\d*)/gi;
     const mentionedOneBased: number[] = [];

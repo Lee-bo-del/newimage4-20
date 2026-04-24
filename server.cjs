@@ -385,6 +385,25 @@ app.post("/api/generate", generateLimiter, async (req, res) => {
         ],
         stream: false
       };
+    } else if (requestBody.model === "gpt-image-2") {
+      finalRequestBody = {
+        model: "gpt-image-2",
+        prompt: requestBody.prompt,
+        size: requestBody.size || "auto",
+        quality: requestBody.quality || "auto",
+        output_format: requestBody.output_format || "png",
+        moderation: requestBody.moderation || "auto",
+      };
+
+      if (requestBody.n) finalRequestBody.n = requestBody.n;
+      if (
+        requestBody.output_format &&
+        requestBody.output_format !== "png" &&
+        requestBody.output_compression !== undefined &&
+        requestBody.output_compression !== null
+      ) {
+        finalRequestBody.output_compression = requestBody.output_compression;
+      }
     }
 
     const response = await requestWithRetry(
@@ -485,22 +504,53 @@ app.post("/api/edit", generateLimiter, async (req, res) => {
       };
     };
 
+    const appendImageField = (formDataInstance, fieldName, value, index = 0) => {
+      const parsedImage = parseBase64ImageInput(value, "png", "image/png");
+      if (!parsedImage || parsedImage.buffer.length === 0) return false;
+
+      formDataInstance.append(fieldName, parsedImage.buffer, {
+        filename: `input-${index + 1}.${parsedImage.ext}`,
+        contentType: parsedImage.mime,
+      });
+      return true;
+    };
+
     const formData = new FormData();
     formData.append('model', requestBody.model);
     formData.append('prompt', requestBody.prompt);
-    
-    if (requestBody.n) formData.append('n', String(requestBody.n));
-    if (requestBody.size) formData.append('size', requestBody.size);
-    if (requestBody.image_size) formData.append('image_size', requestBody.image_size);
-    if (requestBody.aspect_ratio) formData.append('aspect_ratio', requestBody.aspect_ratio);
 
-    if (requestBody.image) {
-      const parsedImage = parseBase64ImageInput(requestBody.image, "png", "image/png");
-      if (parsedImage && parsedImage.buffer.length > 0) {
-        formData.append('image', parsedImage.buffer, {
-          filename: `image.${parsedImage.ext}`,
-          contentType: parsedImage.mime,
-        });
+    const isGptImage2Edit = requestBody.model === "gpt-image-2";
+
+    if (isGptImage2Edit) {
+      if (requestBody.size) formData.append('size', requestBody.size);
+      if (requestBody.quality) formData.append('quality', requestBody.quality);
+      if (requestBody.output_format) formData.append('output_format', requestBody.output_format);
+      if (requestBody.moderation) formData.append('moderation', requestBody.moderation);
+      if (
+        requestBody.output_format &&
+        requestBody.output_format !== "png" &&
+        requestBody.output_compression !== undefined &&
+        requestBody.output_compression !== null
+      ) {
+        formData.append('output_compression', String(requestBody.output_compression));
+      }
+
+      const images = Array.isArray(requestBody.images)
+        ? requestBody.images
+        : requestBody.image
+          ? [requestBody.image]
+          : [];
+      images.forEach((imageValue, index) => {
+        appendImageField(formData, 'image[]', imageValue, index);
+      });
+    } else {
+      if (requestBody.n) formData.append('n', String(requestBody.n));
+      if (requestBody.size) formData.append('size', requestBody.size);
+      if (requestBody.image_size) formData.append('image_size', requestBody.image_size);
+      if (requestBody.aspect_ratio) formData.append('aspect_ratio', requestBody.aspect_ratio);
+
+      if (requestBody.image) {
+        appendImageField(formData, 'image', requestBody.image, 0);
       }
     }
     

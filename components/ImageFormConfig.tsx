@@ -19,6 +19,14 @@ export const ImageFormConfig: React.FC = () => {
     setImageModel,
     imageLine,
     setImageLine,
+    gptImageQuality,
+    setGptImageQuality,
+    gptImageOutputFormat,
+    setGptImageOutputFormat,
+    gptImageOutputCompression,
+    setGptImageOutputCompression,
+    gptImageModeration,
+    setGptImageModeration,
   } = useSelectionStore();
 
   useEffect(() => {
@@ -45,10 +53,22 @@ export const ImageFormConfig: React.FC = () => {
   ];
 
   const isNanoBanana = imageModel === 'nano-banana';
+  const isGptImage2 = imageModel === 'gpt-image-2';
   const nanoBananaCost = imageLine === 'line3' ? 5 : 14;
   const gridClass = isNanoBanana
     ? 'grid-cols-[1.2fr_1fr_1.2fr_0.8fr] gap-1.5'
-    : 'grid-cols-[1.4fr_1fr_0.8fr] gap-1.5';
+    : 'grid-cols-3 gap-1.5';
+
+  const commitGptCompression = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setGptImageOutputCompression(null);
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isNaN(parsed)) return;
+    setGptImageOutputCompression(Math.max(0, Math.min(100, Math.round(parsed))));
+  };
 
   return (
     <>
@@ -107,6 +127,7 @@ export const ImageFormConfig: React.FC = () => {
             value={imageSize}
             onChange={(val) => setImageSize(val)}
             options={[
+              ...(isGptImage2 ? [{ value: 'auto', label: 'Auto' }] : []),
               { value: '1k', label: '1K' },
               { value: '2k', label: '2K' },
               { value: '4k', label: '4K' },
@@ -127,6 +148,63 @@ export const ImageFormConfig: React.FC = () => {
               ]}
             />
           </div>
+        )}
+
+        {isGptImage2 && (
+          <>
+            <div>
+              <label className="block text-[10px] text-gray-500 mb-1">{'\u8D28\u91CF'}</label>
+              <DropUpSelect
+                value={gptImageQuality}
+                onChange={(val) => setGptImageQuality(val as typeof gptImageQuality)}
+                options={[
+                  { value: 'auto', label: 'Auto' },
+                  { value: 'low', label: 'Low' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'high', label: 'High' },
+                ]}
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] text-gray-500 mb-1">{'\u683C\u5F0F'}</label>
+              <DropUpSelect
+                value={gptImageOutputFormat}
+                onChange={(val) => setGptImageOutputFormat(val as typeof gptImageOutputFormat)}
+                options={[
+                  { value: 'png', label: 'PNG' },
+                  { value: 'jpeg', label: 'JPEG' },
+                  { value: 'webp', label: 'WebP' },
+                ]}
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] text-gray-500 mb-1">{'\u538B\u7F29'}</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                disabled={gptImageOutputFormat === 'png'}
+                value={gptImageOutputCompression ?? ''}
+                onChange={(e) => commitGptCompression(e.target.value)}
+                placeholder="0-100"
+                className="w-full min-h-[42px] sm:min-h-0 bg-gray-800 border border-gray-700 rounded px-2 py-2 text-sm sm:text-xs text-white disabled:opacity-45 disabled:cursor-not-allowed"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] text-gray-500 mb-1">{'\u5BA1\u6838'}</label>
+              <DropUpSelect
+                value={gptImageModeration}
+                onChange={(val) => setGptImageModeration(val as typeof gptImageModeration)}
+                options={[
+                  { value: 'auto', label: 'Auto' },
+                  { value: 'low', label: 'Low' },
+                ]}
+              />
+            </div>
+          </>
         )}
 
         <div>
